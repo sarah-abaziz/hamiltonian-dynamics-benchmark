@@ -29,3 +29,7 @@ desktop.ini
 # Environment variables and secrets
 .env
 .env.*
+
+# Data & results
+data/
+results/

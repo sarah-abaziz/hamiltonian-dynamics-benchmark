@@ -1,10 +1,8 @@
 """Dataset generation: simulate trajectories, save arrays + a JSON metadata file."""
 import json
+import numpy as np
 from pathlib import Path
 from typing import Dict, Optional
-
-import numpy as np
-
 from .base import DynamicalSystem
 
 

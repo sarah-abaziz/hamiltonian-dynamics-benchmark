@@ -1,9 +1,7 @@
 """Plot helpers. All functions return the figure(s) and never call plt.show()."""
-from typing import Tuple
-
 import matplotlib.pyplot as plt
 import numpy as np
-
+from typing import Tuple
 from .base import DynamicalSystem
 
 
