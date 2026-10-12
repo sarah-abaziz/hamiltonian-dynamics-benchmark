@@ -265,7 +265,7 @@ class SPDExpLayer(nn.Module):
             der = P @ D @ P.transpose(-1, -2)
 
             # here we compute the derivatives of U w.r.t its vectorized form
-            der = der @ self.dUdx
+            der = der @ self.dUdx.to(dtype=der.dtype, device=der.device)
 
             # finally , we reshape before final operation
             der = der.view(-1, self.n_dof, self.n_dof, self.m).transpose(1, 2)
@@ -307,12 +307,11 @@ class SPDExpLayer(nn.Module):
         if len(vec.shape) == 2:
             # in this case we initialize the symmetric matrix using a repeated 0 matrix
             # .repeat() creates a new tensor with physically separate memory for each copy. So, modifying one matrix in the batch does not affect the others.
-            symmat = self.zero_mat.repeat(bs, 1, 1)
+            symmat = torch.zeros(bs, self.n_dof, self.n_dof, dtype=vec.dtype, device=vec.device)
         elif len(vec.shape) == 3:
             # case 2 - the vec has a shape (bs, m, T)
-            # T here can represent different time steps (time series), frames (videos), channels (pictures)
-            symmat = self.zero_mat.view(1, self.n_dof, self.n_dof, 1).repeat(bs, 1, 1, vec.shape[2])
-
+            # T here can represent different time steps (time series), frames (videos), channels (pictures) 
+            symmat = torch.zeros(bs, self.n_dof, self.n_dof, vec.shape[2], dtype=vec.dtype, device=vec.device)
         # the first n degrees of freedom represent the diagonal elements
         symmat[:, self.diag_indices, self.diag_indices] = vec[:, :self.n_dof]
 
@@ -321,8 +320,7 @@ class SPDExpLayer(nn.Module):
         symmat[:, self.tril_indices[0], self.tril_indices[1]] = vec[:, self.n_dof:]
 
         return symmat
-
-
+    
 
 class EuclideanLayer(nn.Module):
     """
@@ -437,8 +435,7 @@ class GeoHNN(nn.Module):
         self.device = kwargs.get("device", "cpu")
 
         # identity matrix, reshaped for batch operations
-        self.eye_mat = torch.eye(self.n_dof).reshape(1, self.n_dof, self.n_dof).to(self.device)
-
+        self.eye_mat = torch.eye(self.n_dof, dtype=torch.float32, device=self.device).reshape(1, self.n_dof, self.n_dof)
         # zero matrix, reshaped for batch operations
         self.zero_mat = torch.zeros(self.n_dof, self.n_dof).reshape(1, self.n_dof, self.n_dof).to(self.device)
 
@@ -505,17 +502,22 @@ class GeoHNN(nn.Module):
             Hamiltonian works with position q and momentum p
             H = T(q,p) + V(q)
         """
+        # Use an identity matrix matching the input dtype and device
+        eye = self.eye_mat.to(dtype=q.dtype, device=q.device)
+
         # First compute the inverse of the mass matrix M
-        y, dy_dq = self.layers_M[0](q, self.eye_mat)
-        for i in range(1, self.n_depth_T_eucl+1):
+        y, dy_dq = self.layers_M[0](q, eye)
+        for i in range(1, self.n_depth_T_eucl + 1):
             y, dy_dq = self.layers_M[i](y, dy_dq)
         M, dMdq = self.layers_M[-1](y, dy_dq)
 
-        # Compute kinetic energy T = 1/2 * p^T * M_inv * p (we predict the inverse so M is out inverse mass inertia)
-        T = 0.5 * (p.view(-1, 1, self.n_dof) @ M @ p.view(-1, self.n_dof, 1)).view(-1)
+        # Compute kinetic energy
+        T = 0.5 * (
+            p.view(-1, 1, self.n_dof) @ M @ p.view(-1, self.n_dof, 1)
+        ).view(-1)
 
         # Compute potential energy V
-        V, der_V = self.layers_V[0](q, self.eye_mat)
+        V, der_V = self.layers_V[0](q, eye)
         for i in range(1, len(self.layers_V)):
             V, der_V = self.layers_V[i](V, der_V)
         V = V.squeeze(-1)
