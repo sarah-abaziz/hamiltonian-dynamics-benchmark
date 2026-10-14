@@ -1,22 +1,4 @@
-"""Semiexplicit symplectic integrator for NON-separable Hamiltonians.
-
-Reference: B. Jayawardana, T. Ohsawa, "Semiexplicit symplectic integrators for non-separable
-Hamiltonian systems" (arXiv:2111.10915).
-
-Idea (Pihajoki's extended phase space + symmetric projection):
-  * Double the phase space: zeta = (q, x, p, y), each block of size d, with extended
-    Hamiltonian  H(q, y) + H(x, p).  Each half is exactly solvable, so a Strang splitting
-    is EXPLICIT (even though H is non-separable).
-  * Before the step, shift zeta by  A^T mu  and after it shift again by  A^T mu, where
-    A(q, x, p, y) = (q - x, p - y).  mu is found by a (simplified) Newton or Broyden iteration
-    so that the result lies back on the diagonal {x = q, y = p}.  This keeps the two copies
-    glued together and makes the map symplectic in the ORIGINAL phase space.
-
-Interface: same as `midpoint` / `verlet`:   f(t, y) -> dy/dt,  y = [q, p],  returns (t, Y).
-`f` is the system's `dynamics`; only f is needed because
-        f(q, p) = [ D2H(q, p), -D1H(q, p) ]
-which is exactly what the two exact sub-flows use.
-"""
+"""Semiexplicit symplectic integrator for NON-separable Hamiltonians."""
 import warnings
 import numpy as np
 
@@ -94,22 +76,7 @@ def _A(z, d):
 
 def semiexplicit(f, tspan, y0, n, order=2, composition="triple_jump", tol=1e-12,
                  max_iter=100, solver="newton", stats=None):
-    """Semiexplicit symplectic integrator for H(q, p) (separable or not).
 
-    Args:
-        f:           dynamics(t, [q, p]) -> [dq/dt, dp/dt]
-        tspan, y0, n: as in `midpoint`: (t0, tf), initial state [q, p], number of steps.
-        order:       2 (Strang), or an even number >= 4 built by `composition`.
-        composition: 'triple_jump' (any order), 'suzuki' (any order) or 'yoshida' (order 6 only).
-        tol:         stop the projection iteration when ||mu_new - mu|| < tol.
-        max_iter:    iteration cap per step (a warning is raised if it is hit).
-        solver:      'newton' (simplified Newton, Jacobian fixed at 4I)  or  'broyden'.
-        stats:       optional dict; if given, stats['iterations'] gets the iteration count of
-                     every step and stats['max_defect'] the largest ||(q,p)-(x,y)|| seen.
-
-    Returns:
-        t (n+1,), Y (n+1, 2d)
-    """
     if solver not in ("newton", "broyden"):
         raise ValueError("solver must be 'newton' or 'broyden'")
     y0 = np.asarray(y0, dtype=float).ravel()

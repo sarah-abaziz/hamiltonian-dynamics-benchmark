@@ -10,13 +10,15 @@ Example:
 import argparse
 import ast
 
+from src.datasets.systems.low_dim import presets
 from src.datasets.generate import generate_dataset, save_dataset
-from src.datasets.systems.low_dim import SimplePendulum, DoublePendulum, MassSpringSystem, HenonHeiles
-from src.datasets.systems.high_dim import CoupledOscillators, presets, FermiPastaUlamTsingou, LennardJonesFluid
+from src.datasets.systems.low_dim import SimplePendulum, DoublePendulum, MassSpringSystem, HenonHeiles, FermiPastaUlamTsingou, SphericalPendulum, KeplerProblem, ChargedParticleMagneticTrap, CoupledOscillators
+from src.datasets.systems.high_dim import LennardJonesFluid
 from src.datasets.integrators import INTEGRATORS
 
 
 SYSTEMS = {
+    # Low dimensional systems
     "simple_pendulum": SimplePendulum,
     "double_pendulum": DoublePendulum,
     "mass_spring": MassSpringSystem,
@@ -27,6 +29,11 @@ SYSTEMS = {
     "nbody_binary": presets.binary_star,
     "nbody_lagrange": presets.lagrange_triangle,
     "fput": FermiPastaUlamTsingou,
+    "charged_particle": ChargedParticleMagneticTrap,
+    "kepler": KeplerProblem,
+    "spherical_pendulum": SphericalPendulum,
+    
+    # High dimensional systems
     "lennard_jones": LennardJonesFluid,
 }
 
