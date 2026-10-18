@@ -2,7 +2,7 @@
 import warnings
 import numpy as np
 
-# Yoshida's 6th-order composition (7 stages, solution A) built on the 2nd-order base.
+# Yoshida's 6th-order composition built on the 2nd-order base.
 _Y6 = (0.784513610477560, 0.235573213359357, -1.17767998417887)
 _Y6 = _Y6 + (1.0 - 2.0 * sum(_Y6),) + _Y6[::-1]
 
@@ -74,6 +74,11 @@ def _A(z, d):
     return np.concatenate([z[:d] - z[d:2 * d], z[2 * d:3 * d] - z[3 * d:]])
 
 
+def to_qpxy(z, d):
+    """Convert this module's extended layout (q, x, p, y) to the common layout (q, p, x, y)."""
+    return np.concatenate([z[:d], z[2 * d:3 * d], z[d:2 * d], z[3 * d:]])
+
+
 def semiexplicit(f, tspan, y0, n, order=2, composition="triple_jump", tol=1e-12,
                  max_iter=100, solver="newton", stats=None):
 
@@ -93,21 +98,26 @@ def semiexplicit(f, tspan, y0, n, order=2, composition="triple_jump", tol=1e-12,
     Y = np.zeros((n + 1, 2 * d))
     Y[0] = y0
     iters, worst_defect, n_fail = [], 0.0, 0
+    residuals, defects, conv_flags, n_phi = [], [], [], 0
+    Z = np.zeros((n + 1, 4 * d)) if stats is not None else None
+    if Z is not None:
+        Z[0] = np.concatenate([y0[:d], y0[d:], y0[:d], y0[d:]])
     q, p = y0[:d].copy(), y0[d:].copy()
 
     for i in range(n):
         zeta = np.concatenate([q, q, p, p])                  # point on N
         mu = np.zeros(2 * d)
-        zh, fv = eval_f(zeta, mu)
+        zh, fv = eval_f(zeta, mu); n_phi += 1
         H = np.eye(2 * d) / 4.0                              # (Df_0)^-1 = 1/4 I
         converged = False
         for k in range(max_iter):
             step = H @ fv if solver == "broyden" else 0.25 * fv
-            if np.linalg.norm(step) < tol:                   # ||mu^(N+1) - mu^(N)|| < tol
+            res = float(np.linalg.norm(step))
+            if res < tol:                                    # ||mu^(N+1) - mu^(N)|| < tol
                 converged = True
                 break
             mu_new = mu - step
-            zh_new, fv_new = eval_f(zeta, mu_new)
+            zh_new, fv_new = eval_f(zeta, mu_new); n_phi += 1
             if solver == "broyden":                          # "good" Broyden, inverse update
                 dm, df = mu_new - mu, fv_new - fv
                 Hdf = H @ df
@@ -117,19 +127,30 @@ def semiexplicit(f, tspan, y0, n, order=2, composition="triple_jump", tol=1e-12,
             mu, zh, fv = mu_new, zh_new, fv_new
         else:
             n_fail += 1
-        iters.append(k)
+        iters.append(k if converged else max_iter)
+        residuals.append(res if max_iter > 0 else np.nan)
+        conv_flags.append(converged)
 
         zeta_next = zh + _AT(mu, d)                          # lies on N up to tol
         q, p = zeta_next[:d].copy(), zeta_next[2 * d:3 * d].copy()
         Y[i + 1, :d], Y[i + 1, d:] = q, p
         if stats is not None:
-            worst_defect = max(worst_defect, float(np.linalg.norm(_A(zeta_next, d))))
+            dfx = float(np.linalg.norm(_A(zeta_next, d)))
+            defects.append(dfx)
+            worst_defect = max(worst_defect, dfx)
+            Z[i + 1] = to_qpxy(zeta_next, d)
 
     if n_fail:
         warnings.warn(f"semiexplicit: projection did not reach tol={tol:g} in {max_iter} iterations "
                       f"on {n_fail}/{n} steps. Use a smaller dt, solver='broyden', or a larger tol.")
     if stats is not None:
-        stats["iterations"] = iters
+        stats["iterations"] = iters                 # Newton/Broyden iterations per step
+        stats["residual"] = np.array(residuals)     # last ||mu update|| per step
+        stats["converged"] = np.array(conv_flags)   # per-step convergence flag
+        stats["defect"] = np.array(defects)         # ||A zeta_next|| = copy separation per step
         stats["max_defect"] = worst_defect
         stats["n_not_converged"] = n_fail
+        stats["n_phi_evals"] = n_phi                # evaluations of the explicit composition Phi_hat
+        stats["Z"] = Z                              # extended states, layout (q, p, x, y)
+        stats["gap"] = np.concatenate([[0.0], np.array(defects)])
     return t, Y

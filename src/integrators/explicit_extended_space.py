@@ -1,58 +1,19 @@
 """Explicit symplectic integrators for NON-separable Hamiltonians."""
 import numpy as np
 
-# Pyhamsys Implementation 
+# Pihajoki
+def pihajoki_step(f, z, h, d, alpha_m=1.0, beta_m=0.0):
+    """One step  [M, H2(h/2) H1(h/2) M H1(h/2) H2(h/2)]  on an extended state z = (q, p, x, y).
 
-# def _run(f, tspan, y0, n, *, solver, omega, tol=1e-10, max_iter=100, **extra):
-#     from pyhamsys import HamSys, solve_ivp_sympext
-#     try:
-#         from pyhamsys import Parameters
-#     except ImportError:
-#         from pyhamsys.pyhamsys import Parameters
-
-#     y0 = np.asarray(y0, dtype=float).ravel()
-#     h = (tspan[1] - tspan[0]) / float(n)
-#     t_eval = tspan[0] + h * np.arange(n + 1)
-
-#     try:
-#         hs = HamSys(ndof=len(y0) // 2)
-#     except TypeError:                       
-#         hs = HamSys()
-#     hs.y_dot = lambda t, y: np.asarray(f(t, y), dtype=float)
-
-#     if n < 2:
-#         raise ValueError("n must be >= 2")
-    
-#     step_req = (tspan[1] - tspan[0]) / (n - 1.5)
-#     params = Parameters(step=step_req, solver=solver, omega=omega, tol=tol, max_iter=max_iter, **extra)
-#     sol = solve_ivp_sympext(hs, tuple(tspan), y0, params, t_eval=t_eval)
-#     if abs(sol.step - h) > 1e-9 * h:
-#         raise RuntimeError(f"pyhamsys used step {sol.step}, expected {h}")
-
-#     y = np.asarray(sol.y)                   
-#     if y.shape != (len(y0), n + 1):
-#         raise RuntimeError(f"unexpected sol.y shape {y.shape}, expected {(len(y0), n + 1)}")
-#     return np.asarray(sol.t), y.T, sol
-
-
-# # def pihajoki_unmixed(f, tspan, y0, n, solver="Verlet", **kw):
-# #     t, y, _ = _run(f, tspan, y0, n, solver=solver, omega=0.0, **kw)   
-# #     return t, y
-
-# # def tao(f, tspan, y0, n, solver="Verlet", omega=10.0, **kw):
-# #     t, y, _ = _run(f, tspan, y0, n, solver=solver, omega=omega, **kw)
-# #     return t, y
-
-
-# Pihajoki 
-def pihajoki(f, tspan, y0, n, alpha_m=1.0, beta_m=0.0):
-    y0 = np.asarray(y0, dtype=float).ravel()
-    d = len(y0) // 2
-    h = (tspan[1] - tspan[0]) / float(n)
+    H1, H2 are exact flows of H(q, y) and H(x, p). M is the mixing map; 
+    it is symplectic only for (alpha, beta) in {(1, 1), (0, 0)}. Defaults to (1, 0) 
+    for the best long-term energy behavior (Pihajoki 2015).
+    """
     a, b = float(alpha_m), float(beta_m)
+    q, p, qt, pt = z[:d], z[d:2 * d], z[2 * d:3 * d], z[3 * d:]
 
-    def F(q, p):                                  
-        r = np.asarray(f(0.0, np.concatenate([q, p])), dtype=float)
+    def F(u, v):
+        r = np.asarray(f(0.0, np.concatenate([u, v])), dtype=float)
         return r[:d], r[d:]
 
     def H1(s, q, qt, p, pt):
@@ -64,17 +25,50 @@ def pihajoki(f, tspan, y0, n, alpha_m=1.0, beta_m=0.0):
     def M(q, qt, p, pt):
         return a * q + (1 - a) * qt, (1 - a) * q + a * qt, b * p + (1 - b) * pt, (1 - b) * p + b * pt
 
-    q, qt, p, pt = y0[:d].copy(), y0[:d].copy(), y0[d:].copy(), y0[d:].copy()
+    s = M(q, qt, p, pt)
+    s = H2(h / 2, *s); s = H1(h / 2, *s); s = M(*s); s = H1(h / 2, *s); s = H2(h / 2, *s)
+    q, qt, p, pt = s
+    return np.concatenate([q, p, qt, pt])
+
+
+def _output(z, d, output):
+    """Physical state returned by an extended-space method: copy 1, copy 2 or their mean."""
+    c1, c2 = z[..., :2 * d], z[..., 2 * d:]
+    if output == "q":
+        return c1
+    if output == "x":
+        return c2
+    if output == "mean":
+        return 0.5 * (c1 + c2)
+    raise ValueError("output must be 'q' (copy 1), 'x' (copy 2) or 'mean'")
+
+
+def pihajoki(f, tspan, y0, n, alpha_m=1.0, beta_m=0.0, output="q", stats=None):
+    """Pihajoki's explicit extended-phase-space integrator.
+
+    The returned trajectory is the physical projection `output` of the extended state
+    ('q' = copy 1 [default, unchanged behaviour], 'x' = copy 2, 'mean').  stats (dict) receives Z (n+1, 4d, layout q,p,x,y) and gap (n+1,) = ||copy1-copy2||.
+    """
+    y0 = np.asarray(y0, dtype=float).ravel()
+    d = len(y0) // 2
+    h = (tspan[1] - tspan[0]) / float(n)
+    z = np.concatenate([y0, y0])
     out = np.empty((n + 1, 2 * d)); out[0] = y0
-    
+    Z = np.empty((n + 1, 4 * d)); Z[0] = z
     for k in range(n):
-        s = M(q, qt, p, pt)                       
-        s = H2(h / 2, *s); s = H1(h / 2, *s); s = M(*s); s = H1(h / 2, *s); s = H2(h / 2, *s)
-        q, qt, p, pt = s
-        # out[k + 1] = np.concatenate([(q + qt) / 2, (p + pt) / 2])
-        out[k + 1] = np.concatenate([q, p])
-        
+        z = pihajoki_step(f, z, h, d, alpha_m, beta_m)
+        Z[k + 1] = z
+        out[k + 1] = _output(z, d, output)
+    if stats is not None:
+        stats["Z"] = Z
+        stats["gap"] = np.linalg.norm(Z[:, :2 * d] - Z[:, 2 * d:], axis=1)
     return tspan[0] + h * np.arange(n + 1), out
+
+
+def pihajoki_extended_H(H, z, d):
+    """Hbar = H(q, y) + H(x, p) for z = (q, p, x, y)."""
+    q, p, x, y = _split(z, d)
+    return float(H(np.concatenate([q, y])) + H(np.concatenate([x, p])))
 
 
 # Tao
@@ -107,7 +101,7 @@ def flow_C(z, delta, omega, d):
 
 
 def strang_step(f, z, delta, omega, d):
-    """phi_2^delta = A(d/2) B(d/2) C(d) B(d/2) A(d/2)   (eq. 2).  Apply order: rightmost first."""
+    """phi_2^delta = A(d/2) B(d/2) C(d) B(d/2) A(d/2).  Apply order: rightmost first."""
     z = flow_A(f, z, 0.5 * delta, d)
     z = flow_B(f, z, 0.5 * delta, d)
     z = flow_C(z, delta, omega, d)
@@ -116,7 +110,7 @@ def strang_step(f, z, delta, omega, d):
 
 
 def make_step(order, literal_gamma=False):
-    """Return step(f, z, delta, omega, d) of the requested even order via the triple jump (eq. 3)."""
+    """Return step(f, z, delta, omega, d) of the requested even order via the triple jump."""
     if order < 2 or order % 2:
         raise ValueError("order must be an even integer >= 2")
     if order == 2:
@@ -131,8 +125,25 @@ def make_step(order, literal_gamma=False):
         return z
     return step
 
-def tao(f, tspan, y0, n, omega=20.0, order=2, literal_gamma=False, stats=None):
-    """Tao's explicit symplectic integrator (symplectic in the extended phase space)."""
+def tao_extended_H(H, z, omega, d):
+    """Hbar = H(q, y) + H(x, p) + omega * 1/2 (|q - x|^2 + |p - y|^2) for z = (q, p, x, y)."""
+    q, p, x, y = _split(z, d)
+    Hc = 0.5 * (np.sum((q - x) ** 2) + np.sum((p - y) ** 2))
+    return float(H(np.concatenate([q, y])) + H(np.concatenate([x, p])) + omega * Hc)
+
+
+def tao_step(f, z, delta, omega, d, order=2, literal_gamma=False):
+    """One Tao step on an extended state z = (q, p, x, y) (exactly the step used inside `tao`)."""
+    return make_step(order, literal_gamma)(f, z, delta, omega, d)
+
+
+def tao(f, tspan, y0, n, omega=20.0, order=2, literal_gamma=False, output="q", stats=None):
+    """Tao's explicit symplectic integrator (symplectic in the extended phase space).
+
+    The returned trajectory is the physical projection `output` ('q' = copy 1 [default], 'x', 'mean');
+    that projection is not itself a symplectic map of the original phase space.
+    stats receives Z (n+1, 4d, layout q,p,x,y), gap/defect (n+1,) = ||copy1 - copy2||, x, y.
+    """
     
     y0 = np.asarray(y0, dtype=float).ravel()
     d = len(y0) // 2
@@ -146,12 +157,15 @@ def tao(f, tspan, y0, n, omega=20.0, order=2, literal_gamma=False, stats=None):
     defect = np.zeros(n + 1)
     X2 = np.zeros((n + 1, 2 * d))
     X2[0] = y0
+    Z = np.zeros((n + 1, 4 * d))
+    Z[0] = z
     for i in range(n):
         z = step(f, z, delta, omega, d)
         q, p, x, y = _split(z, d)
-        Y[i + 1, :d], Y[i + 1, d:] = q, p
+        Y[i + 1] = _output(z, d, output)
         X2[i + 1, :d], X2[i + 1, d:] = x, y
+        Z[i + 1] = z
         defect[i + 1] = np.linalg.norm(np.concatenate([q - x, p - y]))
     if stats is not None:
-        stats["defect"], stats["x"], stats["y"] = defect, X2[:, :d], X2[:, d:]
+        stats["defect"], stats["gap"], stats["x"], stats["y"], stats["Z"] = defect, defect, X2[:, :d], X2[:, d:], Z
     return t, Y
