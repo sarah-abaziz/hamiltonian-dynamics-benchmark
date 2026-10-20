@@ -42,3 +42,14 @@ def lagrange_triangle(**kw):
                                     np.array([R * np.cos(a), R * np.sin(a), 0.0]),
                                     m * v * np.array([-np.sin(a), np.cos(a), 0.0])))
     return NBodySystem(bodies, **kw)
+
+M_SUN, M_EARTH, M_JUP = 332946.0, 1.0, 317.83
+G_EM = 2.959122e-4 / M_SUN          # AU^3 / (M_earth day^2)
+
+def sun_earth_jupiter_em(**kw):
+    def planet(name, m, r, color):
+        v = np.sqrt(G_EM * M_SUN / r)
+        return CelestialBody(name, m, np.array([r, 0, 0.0]), np.array([0, m * v, 0.0]), color, "o", 8)
+    sun = CelestialBody("Sun", M_SUN, np.zeros(3), np.zeros(3), "yellow", "*", 15)
+    return NBodySystem([sun, planet("Earth", M_EARTH, 1.0, "blue"),
+                        planet("Jupiter", M_JUP, 5.2, "orange")], G=G_EM, **kw)

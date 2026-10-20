@@ -19,7 +19,7 @@ class CelestialBody:
 class NBodySystem(DynamicalSystem):
     """N-body gravitational system in Hamiltonian formulation"""
 
-    def __init__(self, bodies: List[CelestialBody], use_barycenter_frame: bool = True):
+    def __init__(self, bodies: List[CelestialBody], use_barycenter_frame: bool = True, G=2.959e-4):
         """
         Initialize N-body system.
 
@@ -38,7 +38,7 @@ class NBodySystem(DynamicalSystem):
 
         # Gravitational constant in AU³/(M_sun * day²)
         # For normalized units where solar mass = 1, distance in AU, time in days
-        self.G = 2.959e-4
+        self.G = G
 
         # Process initial conditions
         initial_positions = np.array([body.initial_position for body in bodies])
